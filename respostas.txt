@@ -1,7 +1,7 @@
 Atividade Prática - Modelagem de Algoritmos Paralelos: Bag-of-Tasks com pthreads
 Computação de Alto Desempenho - UNISINOS
 
-Integrantes: Leonardo Ian de Oliveira, Gustavo Scheffel e Hiago Panseira
+Integrantes: Leonardo Ian de Oliveira, Arthur Zanni
 
 Máquina usada nas medições:
   Processador: AMD EPYC 9V74 (ambiente de contêiner / GitHub Codespaces)
