@@ -19,14 +19,14 @@ programa não deu nenhum erro visível nem perdeu/duplicou tarefa. Mas isso
 não quer dizer que está certo, só que não deu pra pegar o bug nessas
 execuções. Tem dois problemas escondidos aí: primeiro, o POSIX permite
 que o pthread_cond_wait acorde sozinho de vez em quando, sem ninguém ter
-dado signal (acordada espúria) -- com if a thread não confere de novo e
+dado signal (acordada espúria). Com if a thread não confere de novo e
 sai achando que tem tarefa quando pode não ter. Segundo, mesmo quando
 alguém realmente sinaliza, entre o momento em que a thread acorda e o
 momento em que ela consegue pegar o mutex de volta, outro consumidor pode
 ter entrado na frente e levado o item. Com if ela nem percebe isso e vai
 ler a fila vazia do mesmo jeito. Com só 3 consumidores essa corrida deve
 ser rara de acontecer na prática, o que explica por que "pareceu"
-funcionar nos nossos testes -- só desfizemos a troca depois.
+funcionar nos nossos testes, e só desfizemos a troca depois.
 
 Q2. Quando a thread vai dormir, o pthread_cond_wait solta o mutex m
 nesse mesmo instante (não tem brecha em que ela já largou o mutex mas
@@ -34,15 +34,15 @@ ainda não está dormindo, então não perde sinal nenhum). E quando ela
 acorda, antes de voltar pro código ela já readquire o mutex sozinha. Se
 não fizesse isso, ou seja, se a thread dormisse segurando o mutex,
 ninguém mais ia conseguir travar ele pra mexer na fila e mandar o sinal
--- geraria um deadlock, porque justamente quem podia acordar essa thread
+geraria um deadlock, porque justamente quem podia acordar essa thread
 ficaria travado esperando o mutex que ela está segurando dormindo.
 
 Q3. O jeito que os consumidores sabem que acabou é uma tarefa especial,
 o FIM (-1), que passa pela fila igual as outras: depois de inserir as 20
 de verdade, o produtor manda uma FIM pra cada um dos 3 consumidores, e
 quem recebe isso simplesmente encerra. Comentamos essas 3 linhas de
-insere(FIM) pra testar e o programa travou de vez -- tivemos que matar
-com timeout. Faz sentido: os consumidores comem as 20 tarefas normais e
+insere(FIM) pra testar e o programa travou de vez, então tivemos que matar
+com timeout. Faz sentido pois os consumidores comem as 20 tarefas normais e
 ficam dormindo pra sempre esperando algo em nao_vazia, porque ninguém
 nunca mais vai sinalizar aquilo. Fila vazia sozinha não diz nada sobre o
 trabalho ter acabado, por isso precisa da sentinela. Desfizemos depois.
@@ -70,16 +70,16 @@ nenhum entre chamadas. Como as threads nunca escrevem no mesmo endereço
 de memória ao mesmo tempo, não existe condição de corrida pra proteger,
 e por isso dá pra passar sem mutex. Os resultados parciais só se
 encontram lá na linha 119 (total += args[i].primos;), logo depois do
-pthread_join da linha 118 -- e reparando bem, nem ali tem concorrência de
+pthread_join da linha 118 e reparando bem, nem ali tem concorrência de
 verdade, porque quando o main chega nessa linha a thread i já acabou
 (foi isso que o join garantiu), então é tudo sequencial nesse ponto.
 
 Q5. O motivo do desbalanceamento é que v(k) = 1.000.000.001 +
 600.000·k² cresce com o quadrado de k, e o teste de primalidade custa
-O(√v) -- então quanto maior o k, maior o número, e mais caro fica
+O(√v) então quanto maior o k, maior o número, e mais caro fica
 testar ele, mesmo que cada thread receba a mesma quantidade de índices.
 Deu pra ver isso bem claro nos tempos: a thread 0 (k baixo) fechou em
-14,94s e a thread 3 (k alto) levou 53,83s, quase 4x mais devagar -- e
+14,94s e a thread 3 (k alto) levou 53,83s, quase 4x mais devagar e
 como o programa só termina quando a última thread termina, o tempo todo
 fica refém dessa thread mais lenta. Duas formas de tentar melhorar isso
 sem usar fila: dar os índices de forma intercalada (a thread i pega k =
@@ -87,7 +87,7 @@ i, i+T, i+2T...) em vez de bloco fechado, pra misturar k pequenos e
 grandes entre todas; ou calcular blocos de tamanho variável usando um
 modelo de custo (já que √v cresce quase linear com k, dá pra fazer
 blocos menores conforme k cresce). O problema das duas é que continuam
-sendo uma decisão tomada antes de rodar o programa -- só funcionam se o
+sendo uma decisão tomada antes de rodar o programa e só funcionam se o
 custo real seguir mais ou menos o padrão esperado. Mas dentro de cada
 bloco ainda tem número primo caro do lado de número composto baratíssimo,
 e isso nenhuma regra fixa consegue prever. Só rodando é que dá pra saber
@@ -119,7 +119,7 @@ trabalhadora(), e a sacola de tarefas é a fila circular itens[CAP_FILA],
 protegida pelo mutex_fila e pelas duas condições nao_vazia/nao_cheia.
 Pra juntar os resultados, cada trabalhadora vai contando meus_primos só
 pra ela mesma, sem travar nada, e só no fim do laço (depois de receber o
-FIM) ela trava o mutex_total uma única vez pra somar no total geral --
+FIM) ela trava o mutex_total uma única vez pra somar no total geral,
 assim não fica travando mutex 32 mil vezes. Nesse programa os dois
 modelos praticamente se confundem porque a lista já é conhecida do
 início ao fim, então o mestre enche a sacola de uma vez e não precisa
@@ -134,7 +134,7 @@ Q7. Dá pra estimar o custo médio de uma tarefa usando o T1 do bag:
 muito maior que o custo de mexer na fila (algo na casa dos
 microssegundos). É por isso que compensa: comparando o T1 do estático
 (55,16s) com o do bag (57,92s), o preço de ficar acessando a fila mais
-de 32 mil vezes foi só uns 2,76s a mais, tipo 5% -- e isso já é
+de 32 mil vezes foi só uns 2,76s a mais, tipo 5%, e isso já é
 recuperado de sobra quando T aumenta (T4 bag ficou em 52,48s contra
 53,83s do estático). Agora, se a tarefa fosse uma coisa ridiculamente
 barata, tipo somar dois números, a conta se inverte: gastar tempo pra
@@ -142,19 +142,19 @@ tirar a tarefa da fila custaria mais que executar ela, e o programa
 paralelo ficaria mais lento que rodar tudo sequencial. E se fosse o
 contrário, um bloco de 8.192 números por tarefa (só 4 tarefas no total),
 a fila quase não seria usada, só que também não teria mais graça
-nenhuma pra reequilibrar a carga -- ia virar o mesmo problema do
+nenhuma pra reequilibrar a carga, ia virar o mesmo problema do
 estático de novo. A regra que dá pra tirar disso: o custo médio de uma
 tarefa precisa ser bem maior (ordens de grandeza) que o custo de mexer
 na fila, e precisa ter bastante mais tarefas do que threads.
 
 Q8. (a) No caso do Pi, como toda amostra custa exatamente igual, não
-tem desbalanceamento nenhum pra corrigir -- a carga já é uniforme. Usar
+tem desbalanceamento nenhum pra corrigir porque a carga já é uniforme. Usar
 bag-of-tasks aqui não ia ajudar em nada, e provavelmente até pioraria,
 porque cada amostra sozinha é rápida demais perto do custo de acessar a
 fila (a não ser que se agrupe várias amostras num lote grande, mas aí já
 é quase igual ao estático de novo). (b) Já o fractal é o caso oposto:
 algumas linhas custam até 100x mais que outras e não tem como saber
-quais antes de renderizar -- é bem o tipo de carga irregular que a gente
+quais antes de renderizar, é bem o tipo de carga irregular que a gente
 viu nesta atividade toda. Aqui o bag-of-tasks ia fazer diferença de
 verdade, pelo mesmo motivo do nosso programa de primos: quem termina uma
 linha barata rápido vai pegar outra da fila, em vez de ficar parado
