@@ -1,0 +1,108 @@
+Atividade Prática - Programação com Threads em C (pthreads)
+Computação de Alto Desempenho - UNISINOS
+
+Integrantes: Leonardo Ian de Oliveira, Gustavo Scheffel e Hiago Panseira
+
+Máquina usada nas medições:
+  Processador: AMD EPYC 9V74 (ambiente de contêiner / GitHub Codespaces)
+  Núcleos (nproc): 2 -- porém /proc/cpuinfo mostra que os 2 processadores
+  lógicos têm o mesmo core id (0): são 2 threads de hardware (SMT) de
+  UM ÚNICO núcleo físico, não 2 núcleos reais. Isso é relevante para Q4/Q5.
+
+
+================================================================
+Parte 0 - Aquecimento (ex0_hello.c)
+================================================================
+
+Q1. A ordem muda a cada execução (testado 3x, sempre diferente). O SO
+escalona as threads e decide a ordem de execução em tempo real; nada no
+código força uma ordem específica entre threads independentes.
+
+Q2. Testado em cópia do arquivo. Sem o join, o main termina e derruba o
+processo (e as threads ainda rodando) antes delas todas imprimirem. Em uma
+execução só 3 das 4 mensagens "Olá da thread..." apareceram, em outra
+apenas 2, e as linhas "main: thread X terminou..." somem (esse trecho
+estava dentro do laço removido). Saída incompleta e imprevisível.
+
+Q3. pthread_create guarda só o ponteiro, não copia o valor. Se todas as
+threads recebessem o endereço de uma única variável (ou &i do laço), ao
+lerem o valor (o que pode acontecer bem depois, quando já escalonadas)
+veriam o último valor escrito, não o que era seu. Por isso cada thread
+precisa de sua própria posição em args[T].
+
+
+================================================================
+Parte 1 - Paralelização e speedup (ex1_paralelo.c)
+================================================================
+
+Corretude: N=5.000.000 -> 348.513 primos; N=20.000.000 -> 1.270.607 primos
+(bate com o esperado, igual para 1/2/4 threads).
+
+Tabela de speedup (N = 20.000.000, média de 3 execuções):
+
+Threads   Tempo (s)   Speedup = T1 / Tn
+1         6,085       1,00
+2         6,222       0,98
+4         6,094       1,00
+
+Q4. Speedup ficou bem abaixo do ideal (~1,0x em vez de 2x/4x), por dois
+motivos: (1) desbalanceamento de carga -- blocos contíguos de tamanho
+igual, mas eh_primo(n) é O(sqrt(n)), então o bloco final (números maiores)
+custa muito mais que o primeiro, e a thread mais lenta domina o tempo
+total; poderia ser corrigido com distribuição cíclica (thread i processa
+i, i+T, i+2T, ...) para espalhar números caros e baratos igualmente; (2)
+esta máquina só tem 1 núcleo físico (2 threads SMT), limitando qualquer
+paralelismo real em carga intensa de CPU.
+
+Q5. nproc = 2, mas são 2 threads SMT do mesmo núcleo físico (não 2 núcleos
+reais) -- por isso o speedup ficou perto de 1,0x. Em geral, criar mais
+threads do que núcleos não acelera um programa limitado por CPU: as
+threads extras não têm onde rodar ao mesmo tempo, o SO passa a revezá-las
+(troca de contexto), e o speedup estagna ou cai levemente.
+
+
+================================================================
+Parte 2 - Condição de corrida e mutex (ex2_corrida.c)
+================================================================
+
+Resultados com T = 4 threads (esperado = 20.000.000):
+
+Versão                                  Resultado        Tempo (s)
+(a) sem proteção (saldo++ direto)       ERRADO, varia    ~0,015
+(b) mutex lock/unlock a cada iteração   correto          ~0,59 (média)
+(c) acumulador local + 1 lock no final  correto          ~0,00
+
+(a) O saldo nunca bate com o esperado e muda a cada execução (obtivemos
+10.085.031, 7.646.572, 8.755.417). saldo++ vira 3 passos no processador
+(ler, somar 1, escrever); com 4 threads intercalando esses passos sobre a
+MESMA variável, duas threads podem ler o mesmo valor antes de qualquer
+uma escrever de volta, e um incremento é perdido. Como a intercalação
+muda a cada execução, o resultado final também muda.
+
+(b) Com mutex em cada saldo++, o resultado ficou sempre correto
+(20.000.000), mas o tempo subiu de ~0,015s para ~0,59s (~40x mais lento):
+agora há 20 milhões de lock/unlock, cada um com custo real. A versão (a)
+só era "rápida" porque fazia o trabalho errado.
+
+(c) Com acumulador local e um único lock por thread ao final, o resultado
+continua correto e o tempo caiu para ~0,000s -- só 4 lock/unlock no total
+em vez de 20 milhões. (Observação: via objdump, o gcc -O2 chegou a
+eliminar o laço de incremento local e trocá-lo por uma soma direta, pois
+`local` não é volatile e não tem efeito colateral -- diferente de `saldo`,
+que É volatile de propósito para preservar a condição de corrida.)
+
+Q6. Regra prática: quanto menor e mais frequente a operação sobre o dado
+compartilhado, maior a fração do tempo gasta em overhead de lock/unlock --
+então vale acumular localmente e sincronizar uma única vez no final.
+Nos números medidos, travar a cada saldo++ (operação trivial) custou
+~40x mais que sem proteção nenhuma, só de overhead de mutex. Só vale
+travar a cada operação individual quando a seção crítica já faz trabalho
+substancial (o lock vira fração pequena do custo) ou quando as threads
+precisam ver o valor atualizado em tempo real.
+
+Q7. No Exercício 1, cada thread já acumula seu resultado em a->parcial
+(campo exclusivo da própria struct, sem nenhuma sincronização durante o
+laço) e o main soma tudo em `total` só depois do join de todas -- mesmo
+princípio da versão (c): acumular localmente e consolidar uma única vez.
+Aqui nem precisa de mutex na soma final, porque ela ocorre no main após
+todas as threads já terem terminado (sem concorrência nesse ponto).
